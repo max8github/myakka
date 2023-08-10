@@ -8,35 +8,30 @@ import akka.stream.{ActorAttributes, Attributes, Supervision}
 import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps
 
-  object Graphs extends App {
-    implicit val system: ActorSystem = ActorSystem("graphThatLogsErrors")
+object Graphs extends App {
+  implicit val system: ActorSystem = ActorSystem("g")
+  implicit val ec: ExecutionContextExecutor = system.dispatcher
 
   final case class Author(handle: String)
-
   final case class Person(first: String, last: String) {
     override def toString: String = s"$first $last"
   }
 
-  final case class Tweet(author: Author, timestamp: Long, body: String)
-
   val input = Source(
-    Tweet(Author("roland.kuhn"), System.currentTimeMillis, "If anything can go wrong, it will.") ::
-      Tweet(Author("patrik.norwall"), System.currentTimeMillis, "Nothing is as easy as it looks.") ::
-      Tweet(Author("andrzej.ludwikowski"), System.currentTimeMillis, "All work expands to fill the time allowed.") ::
-      Tweet(Author("johan.andrén"), System.currentTimeMillis, "The one emergency for which you are fully prepared will never happen.") ::
-      Tweet(Author("enno.runne"), System.currentTimeMillis, "The likelihood of success is inversely proportional to how important the project is.") ::
-      Tweet(Author("peter.vlugter"), System.currentTimeMillis, "If everything is coming your way, watch out.") ::
-      Tweet(Author("shocker"), System.currentTimeMillis, "Everything that can work, will work.") ::
-      Tweet(Author("akka.team"), System.currentTimeMillis, "The shortest distance between two points is usually under construction.") ::
-      Tweet(Author("renato.cavalcanti"), System.currentTimeMillis, "Leftover nuts never match leftover bolts.") ::
-      Tweet(Author("eduardo.pinto"), System.currentTimeMillis, "As soon as you switch lanes, your old lane speeds up.") ::
+    Author("roland.kuhn") ::
+      Author("patrik.norwall") ::
+      Author("andrzej.ludwikowski") ::
+      Author("johan.andrén") ::
+      Author("enno.runne") ::
+      Author("peter.vlugter") ::
+      Author("faultyname") ::
+      Author("renato.cavalcanti") ::
+      Author("eduardo.pinto") ::
       Nil)
 
-  val transformer = Flow[Tweet].map(x => {
-    val name = x.author.handle.split("\\.")
-    val first = name(0)
-    val last = name(1)
-    Person(first, last)
+  val transformer = Flow[Author].map(x => {
+    val name = x.handle.split("\\.")
+    Person(name(0), name(1))
   })
 
   val sink = Sink.foreach[Person](println)
@@ -52,6 +47,5 @@ import scala.language.postfixOps
     .withAttributes(ActorAttributes.supervisionStrategy(decider))
     .run()
 
-  implicit val ec: ExecutionContextExecutor = system.dispatcher
   future.onComplete(_ => system.terminate())
 }
