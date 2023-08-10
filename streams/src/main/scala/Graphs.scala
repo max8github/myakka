@@ -9,8 +9,8 @@ import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps
 
 object Graphs extends App {
-  implicit val system: ActorSystem = ActorSystem("g")
-  implicit val ec: ExecutionContextExecutor = system.dispatcher
+  given system: ActorSystem = ActorSystem("g")
+  given ec: ExecutionContextExecutor = system.dispatcher
 
   final case class Author(handle: String)
   final case class Person(first: String, last: String) {
