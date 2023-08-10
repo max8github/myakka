@@ -4,17 +4,47 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.ClosedShape
 import akka.stream.scaladsl.{Balance, Broadcast, Flow, GraphDSL, Merge, RunnableGraph, Sink, Source, Zip}
+import com.sun.org.apache.xalan.internal.lib.ExsltDatetime.dateTime
 
+import java.time.{Instant, LocalDateTime, ZoneId}
 import scala.language.postfixOps
 
 object GraphBasics extends App {
+  final case class Author(handle: String)
+
+  final case class Hashtag(name: String)
+
+  final case class Tweet(author: Author, timestamp: Long, body: String) {
+    def hashtags: Set[Hashtag] =
+      body
+        .split(" ")
+        .collect {
+          case t if t.startsWith("#") => Hashtag(t.replaceAll("[^#\\w]", ""))
+        }
+        .toSet
+  }
 
   implicit val system: ActorSystem = ActorSystem("GraphBasics")
 
-  val input = Source(1 to 1000)
-  val incrementer = Flow[Int].map(x => x + 1) // hard computation
-  val multiplier = Flow[Int].map(x => x * 10) // hard computation
-  val output = Sink.foreach[(Int, Int)](println)
+  val akkaTag = Hashtag("#akka")
+
+
+  val input: Source[Tweet, NotUsed] = Source(
+    Tweet(Author("roland.kuhn"), System.currentTimeMillis, "#akka rocks!") ::
+      Tweet(Author("patrik.nw"), System.currentTimeMillis, "#akka !") ::
+      Tweet(Author("b.antonsson"), System.currentTimeMillis, "#akka !") ::
+      Tweet(Author("drew.hk"), System.currentTimeMillis, "#akka !") ::
+      Tweet(Author("k.tosopl"), System.currentTimeMillis, "#akka on the rocks!") ::
+      Tweet(Author("m.martynas"), System.currentTimeMillis, "wow #akka !") ::
+      Tweet(Author("akka.team"), System.currentTimeMillis, "#akka rocks!") ::
+      Tweet(Author("banana.man"), System.currentTimeMillis, "#bananas rock!") ::
+      Tweet(Author("apple.man"), System.currentTimeMillis, "#apples rock!") ::
+      Tweet(Author("drama"), System.currentTimeMillis, "we compared #apples to #oranges!") ::
+      Nil)
+
+  val transformer = Flow[Tweet].map(x => Tweet(Author(x.author.handle.replaceAll("\\.", " ")), x.timestamp, x.body))
+  val dater = Flow[Tweet].map(x => Instant.ofEpochMilli(x.timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime)
+  val output = Sink.foreach[(Tweet, LocalDateTime)](println)
 
   // step 1 - setting up the fundamentals for the graph
   val graph = RunnableGraph.fromGraph(
@@ -22,91 +52,48 @@ object GraphBasics extends App {
       import GraphDSL.Implicits._ // brings some nice operators into scope
 
       // step 2 - add the necessary components of this graph
-      val broadcast = builder.add(Broadcast[Int](2)) // fan-out operator
-      val zip = builder.add(Zip[Int, Int]) // fan-in operator
+      val broadcast = builder.add(Broadcast[Tweet](2)) // fan-out operator
+      val zip = builder.add(Zip[Tweet, LocalDateTime]) // fan-in operator
 
-      // step 3 - tying up the components
       input ~> broadcast
 
-      broadcast.out(0) ~> incrementer ~> zip.in0
-      broadcast.out(1) ~> multiplier  ~> zip.in1
+      broadcast.out(0) ~> transformer ~> zip.in0
+      broadcast.out(1) ~> dater  ~> zip.in1
 
       zip.out ~> output
 
-      // step 4 - return a closed shape
       ClosedShape // FREEZE the builder's shape
       // shape
     } // graph
   ) // runnable graph
 
-  //  graph.run() // run the graph and materialize it
+    graph.run() // run the graph and materialize it
 
-  /**
-   * exercise 1: feed a source into 2 sinks at the same time (hint: use a broadcast)
-   */
-
-  val firstSink = Sink.foreach[Int](x => println(s"First sink: $x"))
-  val secondSink = Sink.foreach[Int](x => println(s"Second sink: $x"))
-
-  // step 1
-  val sourceToTwoSinksGraph = RunnableGraph.fromGraph(
-    GraphDSL.create() { implicit builder =>
-      import GraphDSL.Implicits._
-
-      // step 2 - declaring the components
-      val broadcast = builder.add(Broadcast[Int](2))
-
-      // step 3 - tying up the components
-      input ~>  broadcast ~> firstSink  // implicit port numbering
-      broadcast ~> secondSink
-      //      broadcast.out(0) ~> firstSink
-      //      broadcast.out(1) ~> secondSink
-
-      // step 4
-      ClosedShape
-    }
-  )
-
-  /**
-   * exercise 2: balance
-   */
-
-  import scala.concurrent.duration._
-  val fastSource = input.throttle(5, 1 second)
-  val slowSource = input.throttle(2, 1 second)
-
-  val sink1 = Sink.fold[Int, Int](0)((count, _) => {
-    println(s"Sink 1 number of elements: $count")
-    count + 1
-  })
-
-  val sink2 = Sink.fold[Int, Int](0)((count, _) => {
-    println(s"Sink 2 number of elements: $count")
-    count + 1
-  })
-
-  // step 1
-  val balanceGraph = RunnableGraph.fromGraph(
-    GraphDSL.create() { implicit builder =>
-      import GraphDSL.Implicits._
-
-
-      // step 2 -- declare components
-      val merge = builder.add(Merge[Int](2))
-      val balance = builder.add(Balance[Int](2))
-
-
-      // step 3 -- tie them up
-      fastSource ~> merge ~>  balance ~> sink1
-      slowSource ~> merge
-      balance ~> sink2
-
-      // step 4
-      ClosedShape
-    }
-  )
-
-  balanceGraph.run()
+//  /**
+//   * exercise 1: feed a source into 2 sinks at the same time (hint: use a broadcast)
+//   */
+//
+//  val firstSink = Sink.foreach[Tweet](x => println(s"First sink: $x"))
+//  val secondSink = Sink.foreach[LocalDateTime](x => println(s"Second sink: $x"))
+//
+//  // step 1
+//  val sourceToTwoSinksGraph = RunnableGraph.fromGraph(
+//    GraphDSL.create() { implicit builder =>
+//      import GraphDSL.Implicits._
+//
+//      // step 2 - declaring the components
+//      val broadcast = builder.add(Broadcast[Tweet](2))
+//
+//      // step 3 - tying up the components
+//      input ~>  broadcast ~> firstSink
+//      broadcast ~> secondSink
+//      //      broadcast.out(0) ~> firstSink
+//      //      broadcast.out(1) ~> secondSink
+//
+//      // step 4
+//      ClosedShape
+//    }
+//  )
 
 
 }
