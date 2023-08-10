@@ -29,10 +29,23 @@ object Graphs extends App {
       Author("eduardo.pinto") ::
       Nil)
 
-  val transformer = Flow[Author].map(x => {
-    val name = x.handle.split("\\.")
-    Person(name(0), name(1))
-  })
+  val sinkAuthor = Sink.foreach[Author](a => println(s"FAULTY! $a"))
+
+  val transformer = Flow[Author].map(transform)
+    .map {
+      case left@Left(_) => left
+      case right@Right(_) => right
+    }.divertTo(sinkAuthor.contramap(_.swap.getOrElse(Author("empty"))), _.isLeft) //Divert faulty elements
+    .map(e => e.getOrElse(Person("", "")))
+
+  def transform(author: Author) = {
+    try {
+      val name = author.handle.split("\\.")
+      Right(Person(name(0), name(1)))
+    } catch {
+      case _: Throwable => Left(author)
+    }
+  }
 
   val sink = Sink.foreach[Person](println)
 
