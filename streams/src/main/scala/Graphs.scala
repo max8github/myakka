@@ -29,10 +29,12 @@ object Graphs extends App {
       Author("eduardo.pinto") ::
       Nil)
 
-  val transformer = Flow[Author].map(x => {
-    val name = x.handle.split("\\.")
+  val transformer = Flow[Author].map(transform)
+
+  def transform(author: Author) = {
+    val name = author.handle.split("\\.")
     Person(name(0), name(1))
-  })
+  }
 
   val sink = Sink.foreach[Person](println)
 
