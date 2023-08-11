@@ -3,12 +3,12 @@ package org.example.akka.streams
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.event.Logging
-import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
+import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorAttributes, Attributes, Supervision}
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps
-import scala.util.Random
+import scala.util.{Failure, Random, Success}
 
 object Graphs extends App {
   given system: ActorSystem = ActorSystem("g")
@@ -20,23 +20,22 @@ object Graphs extends App {
 
   private def transform(author: Author): Person = {
     val name = author.handle.split("\\.")
+    if (name.length < 2) println("Ouch!")
     Person(capitalizeFirst(name(0)), capitalizeFirst(name(1)))
   }
 
   private val sink = Sink.foreach[Person](println)
+  private val future = input.via(transformer).runWith(sink)
 
-  private val decider: Supervision.Decider = {
-    case _: ArrayIndexOutOfBoundsException => Supervision.Resume
-    case _ => Supervision.Stop
+  future.onComplete {
+    case Success(_) =>
+      println("The future succeeded")
+      system.terminate()
+
+    case Failure(ex) =>
+      println(s"The future failed with $ex")
+      system.terminate()
   }
-
-  private val future = input
-    .log("").withAttributes(Attributes.logLevels(onElement = Logging.DebugLevel, onFinish = Logging.WarningLevel, onFailure = Logging.ErrorLevel))
-    .via(transformer).toMat(sink)(Keep.right)
-    .withAttributes(ActorAttributes.supervisionStrategy(decider))
-    .run()
-
-  future.onComplete(_ => system.terminate())
 }
 
 private object Stream {
@@ -49,7 +48,7 @@ private object Stream {
 
 private object Gen {
   def nextHandlerStringSeq(): Seq[String] =
-    (1 to 1 + Rnd.nextInt(100)).map { _ => nextToken() + "." + nextToken() }
+    (1 to 1 + Rnd.nextInt(64)).map { _ => nextToken() + "." + nextToken() }
 
   def nextToken(): String = {
     val length = MinTokenLength + Rnd.nextInt(MaxTokenLength - MinTokenLength + 1)
