@@ -4,7 +4,7 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.stream.scaladsl.{Flow, Sink, Source}
-import akka.stream.{ActorAttributes, Attributes, Supervision}
+import akka.stream.{ActorAttributes, Attributes, KillSwitches, SharedKillSwitch, Supervision}
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.language.postfixOps
@@ -12,9 +12,9 @@ import scala.util.{Failure, Random, Success}
 
 object Graphs extends App {
   given system: ActorSystem = ActorSystem("g")
-
   given ec: ExecutionContextExecutor = system.dispatcher
 
+  private val killSwitch: SharedKillSwitch = KillSwitches.shared("my-little-kill-switch")
   private val input = Stream.badSource()
   private val transformer = Flow[Author].map(transform)
 
@@ -25,7 +25,7 @@ object Graphs extends App {
   }
 
   private val sink = Sink.foreach[Person](println)
-  private val future = input.via(transformer).runWith(sink)
+  private val future = input.via(transformer).via(killSwitch.flow).runWith(sink)
 
   future.onComplete {
     case Success(_) =>
