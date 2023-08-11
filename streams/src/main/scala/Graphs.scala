@@ -1,12 +1,11 @@
 package org.example.akka.streams
 
-import akka.NotUsed
+import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
-import akka.event.Logging
 import akka.stream.scaladsl.{Flow, Sink, Source}
-import akka.stream.{ActorAttributes, Attributes, KillSwitches, SharedKillSwitch, Supervision}
+import akka.stream.{KillSwitches, SharedKillSwitch}
 
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.language.postfixOps
 import scala.util.{Failure, Random, Success}
 
@@ -15,19 +14,25 @@ object Graphs extends App {
   given ec: ExecutionContextExecutor = system.dispatcher
 
   private val killSwitch: SharedKillSwitch = KillSwitches.shared("my-little-kill-switch")
-  private val input = Stream.badSource()
-  private val transformer = Flow[Author].map(transform)
+  private val sourceFuture = Future.successful(Stream.badSource())
 
-  private def transform(author: Author): Person = {
+  private def sink[T]: (T => Future[Unit]) => Sink[T, Future[Done]] = Sink.foreachAsync(parallelism = 1)
+
+  private def process(x: Author): Future[Unit] =
+    Future {
+      val person = authorToPerson(x)
+      println(person)
+    }
+
+  private def authorToPerson(author: Author): Person = {
     val name = author.handle.split("\\.")
     if (name.length < 2) println("Ouch!")
     Person(capitalizeFirst(name(0)), capitalizeFirst(name(1)))
   }
 
-  private val sink = Sink.foreach[Person](println)
-  private val future = input.via(transformer).via(killSwitch.flow).runWith(sink)
+  private val fu = Source.futureSource(sourceFuture).via(killSwitch.flow).runWith(sink(process))
 
-  future.onComplete {
+  fu.onComplete {
     case Success(_) =>
       println("The future succeeded")
       system.terminate()
