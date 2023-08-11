@@ -14,7 +14,9 @@ object Graphs extends App {
   given ec: ExecutionContextExecutor = system.dispatcher
 
   private val killSwitch: SharedKillSwitch = KillSwitches.shared("my-little-kill-switch")
-  private val sourceFuture = Future.successful(Stream.badSource())
+  private val sourceFutureA = Future.successful(Stream.goodSource())
+  private val sourceFutureB = Future.successful(Stream.badSource())
+  private val sourceFutureC = Future.successful(Stream.goodSource())
 
   private def sink[T]: (T => Future[Unit]) => Sink[T, Future[Done]] = Sink.foreachAsync(parallelism = 1)
 
@@ -26,13 +28,19 @@ object Graphs extends App {
 
   private def authorToPerson(author: Author): Person = {
     val name = author.handle.split("\\.")
-    if (name.length < 2) println("Ouch!")
+    if (name.length < 2) println(s"Ouch! $author")
     Person(capitalizeFirst(name(0)), capitalizeFirst(name(1)))
   }
 
-  private val fu = Source.futureSource(sourceFuture).via(killSwitch.flow).runWith(sink(process))
+  private val fus = Seq(sourceFutureA, sourceFutureB, sourceFutureC).map {src =>
+    Source.futureSource(src).via(killSwitch.flow).runWith(sink(process))
+  }
 
-  fu.onComplete {
+  private val agg = fus.foldLeft(Future.successful[Done](Done)) { (acc, future) =>
+    acc.flatMap(_ => future)
+  }
+
+  agg.onComplete {
     case Success(_) =>
       println("The future succeeded")
       system.terminate()
