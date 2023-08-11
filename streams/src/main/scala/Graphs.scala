@@ -12,35 +12,25 @@ import scala.util.Random
 
 object Graphs extends App {
   given system: ActorSystem = ActorSystem("g")
+
   given ec: ExecutionContextExecutor = system.dispatcher
 
-  val input = Stream.badSource()
-  val sinkAuthor = Sink.foreach[Author](a => println(s"FAULTY! $a"))
+  private val input = Stream.badSource()
+  private val transformer = Flow[Author].map(transform)
 
-  val transformer = Flow[Author].map(transform)
-    .map {
-      case left@Left(_) => left
-      case right@Right(_) => right
-    }.divertTo(sinkAuthor.contramap(_.swap.getOrElse(Author("empty"))), _.isLeft) //Divert faulty elements
-    .map(e => e.getOrElse(Person("", "")))
-
-  def transform(author: Author) = {
-    try {
-      val name = author.handle.split("\\.")
-      Right(Person(name(0), name(1)))
-    } catch {
-      case _: Throwable => Left(author)
-    }
+  private def transform(author: Author): Person = {
+    val name = author.handle.split("\\.")
+    Person(capitalizeFirst(name(0)), capitalizeFirst(name(1)))
   }
 
-  val sink = Sink.foreach[Person](println)
+  private val sink = Sink.foreach[Person](println)
 
-  val decider: Supervision.Decider = {
+  private val decider: Supervision.Decider = {
     case _: ArrayIndexOutOfBoundsException => Supervision.Resume
     case _ => Supervision.Stop
   }
 
-  val future = input
+  private val future = input
     .log("").withAttributes(Attributes.logLevels(onElement = Logging.DebugLevel, onFinish = Logging.WarningLevel, onFailure = Logging.ErrorLevel))
     .via(transformer).toMat(sink)(Keep.right)
     .withAttributes(ActorAttributes.supervisionStrategy(decider))
@@ -59,7 +49,7 @@ private object Stream {
 
 private object Gen {
   def nextHandlerStringSeq(): Seq[String] =
-    (1 to 1 + Rnd.nextInt(100)).map {_ => nextToken() + "." + nextToken()}
+    (1 to 1 + Rnd.nextInt(100)).map { _ => nextToken() + "." + nextToken() }
 
   def nextToken(): String = {
     val length = MinTokenLength + Rnd.nextInt(MaxTokenLength - MinTokenLength + 1)
@@ -80,3 +70,6 @@ private final case class Author(handle: String)
 private final case class Person(first: String, last: String) {
   override def toString: String = s"$first $last"
 }
+
+private def capitalizeFirst(str: String): String =
+  str.head.toUpper.toString + str.tail
