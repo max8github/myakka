@@ -1,17 +1,30 @@
 package org.example.akka.streams
 
-import akka.{Done, NotUsed}
-import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
+import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{KillSwitches, SharedKillSwitch}
+import akka.{Done, NotUsed}
 
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
 import scala.util.{Failure, Random, Success}
 
+object HelloWorld {
+  final case class Greet(whom: String, replyTo: ActorRef[Greeted])
+
+  final case class Greeted(whom: String, from: ActorRef[Greet])
+
+  def apply(): Behavior[Greet] = Behaviors.receive { (context, message) =>
+    context.log.info("Hello {}!", message.whom)
+    message.replyTo ! Greeted(message.whom, context.self)
+    Behaviors.same
+  }
+}
+
 object Graphs extends App {
-  given system: ActorSystem = ActorSystem("g")
-  given ec: ExecutionContextExecutor = system.dispatcher
+  given system: ActorSystem[_] = ActorSystem(HelloWorld(), "g")
+  given ec: ExecutionContext = system.executionContext
 
   private val killSwitch: SharedKillSwitch = KillSwitches.shared("my-little-kill-switch")
   private val sourceFutureA = Future.successful(Stream.goodSource())
@@ -32,7 +45,7 @@ object Graphs extends App {
     Person(capitalizeFirst(name(0)), capitalizeFirst(name(1)))
   }
 
-  private val fus = Seq(sourceFutureA, sourceFutureB, sourceFutureC).map {src =>
+  private val fus = Seq(sourceFutureB).map { src =>
     Source.futureSource(src).via(killSwitch.flow).runWith(sink(process))
   }
 
